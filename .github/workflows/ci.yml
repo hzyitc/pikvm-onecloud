@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+
+env:
+  UBOOT_REPO: hzyitc/u-boot-onecloud
+  UBOOT_RELEASE: latest
+  UBOOT_BURNIMG: eMMC.burn.img
+  ARMBIAN_REPO: armbian/build
+  ARMBIAN_REF: master
+  USERPATCH_REPO: ${{ github.repository }}
+  USERPATCH_REF: ${{ github.ref_name }}
+  BRANCH: edge
+  RELEASE: jammy
+  TYPE: minimal
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get repositories information
+        run: |
+          TIME="$(curl https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} | jq -r .created_at)"
+
+          UBOOT_TAG=$(curl https://api.github.com/repos/${UBOOT_REPO}/releases/${UBOOT_RELEASE} | jq -r .tag_name)
+          ARMBIAN_SHA=$(curl https://api.github.com/repos/${ARMBIAN_REPO}/commits/${ARMBIAN_REF} | jq -r .sha)
+          USERPATCH_SHA=$(curl https://api.github.com/repos/${USERPATCH_REPO}/commits/${USERPATCH_REF} | jq -r .sha)
+
+          cat <<EOF | sed -E 's/^  //' >>$GITHUB_ENV
+            TIME=$TIME
+            UBOOT_TAG=$UBOOT_TAG
+            ARMBIAN_SHA=$ARMBIAN_SHA
+            USERPATCH_SHA=$USERPATCH_SHA
+          EOF
+
+      - name: Show repositories information
+        run: |
+          C_RESET="\e[0m"
+          C_BLACK="\e[30m"
+          C_RED="\e[31m"
+          C_GREEN="\e[32m"
+          C_YELLOW="\e[33m"
+          C_BLUE="\e[34m"
+          C_MAGENTA="\e[35m"
+          C_CYAN="\e[36m"
+          C_GRAY="\e[37m"
+
+          echo -e "$(cat <<EOF | sed -E 's/^  //'
+            TIME: ${C_GREEN}$(date -d "$TIME" +'%Y-%m-%d %H:%M:%S %Z(%:z)')${C_RESET}
+            U-Boot: ${C_BLUE}${UBOOT_REPO}${C_RESET}@${C_MAGENTA}${UBOOT_RELEASE}${C_RESET}(https://github.com/${UBOOT_REPO}/releases/tag/${UBOOT_RELEASE})
+                    ${C_MAGENTA}${UBOOT_TAG}${C_RESET}(https://github.com/${UBOOT_REPO}/releases/tag/${UBOOT_TAG})
+            Armbian: ${C_BLUE}${ARMBIAN_REPO}${C_RESET}@${C_MAGENTA}${ARMBIAN_REF}${C_RESET}(https://github.com/${ARMBIAN_REPO}/tree/${ARMBIAN_REF})
+                     ${C_YELLOW}${ARMBIAN_SHA}${C_RESET}(https://github.com/${SCRIPT_REPO}/tree/${ARMBIAN_SHA})
+            Userpatch: ${C_BLUE}${USERPATCH_REPO}${C_RESET}@${C_MAGENTA}${USERPATCH_REF}${C_RESET}(https://github.com/${USERPATCH_REPO}/tree/${USERPATCH_REF})
+                       ${C_YELLOW}${USERPATCH_SHA}${C_RESET}(https://github.com/${USERPATCH_REPO}/tree/${USERPATCH_SHA})
+          EOF
+          )"
+
+          cat <<EOF | sed -E 's/^  //' >>$GITHUB_STEP_SUMMARY
+            # $(date -d "$TIME" +'%Y-%m-%d %H:%M:%S %Z(%:z)')
+
+            ## Sources
+            U-Boot: [${UBOOT_REPO}@${UBOOT_RELEASE}](https://github.com/${UBOOT_REPO}/releases/tag/${UBOOT_RELEASE}) ([\`${UBOOT_TAG}\`](https://github.com/${UBOOT_REPO}/releases/tag/${UBOOT_TAG}))
+            Armbian: [${ARMBIAN_REPO}@${ARMBIAN_REF}](https://github.com/${ARMBIAN_REPO}/tree/${ARMBIAN_REF}) ([\`${ARMBIAN_SHA}\`](https://github.com/${ARMBIAN_REPO}/tree/${ARMBIAN_SHA}))
+            Userpatch: [${USERPATCH_REPO}@${USERPATCH_REF}](https://github.com/${USERPATCH_REPO}/tree/${USERPATCH_REF}) ([\`${USERPATCH_SHA}\`](https://github.com/${USERPATCH_REPO}/tree/${USERPATCH_SHA}))
+          EOF
+
+      - name: Checkout Armbian
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ env.ARMBIAN_REPO }}
+          ref: ${{ env.ARMBIAN_SHA }}
+
+      - name: Checkout userpatch
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ env.USERPATCH_REPO }}
+          ref: ${{ env.USERPATCH_SHA }}
+          path: userpatches/
+
+      - name: "Apply patch #3774 and #4077"
+        run: |
+          curl -L -O "https://github.com/armbian/build/pull/{3774,4077}.patch"
+          for file in *.patch; do
+            patch --batch -p1 -N <"$file"
+          done
+
+      - name: Build
+        run: |
+          sudo ./compile.sh \
+            VENDOR=PiKVM_Armbian \
+            BOARD=onecloud \
+            BRANCH=${{ env.BRANCH }} \
+            RELEASE=${{ env.RELEASE }} \
+            KERNEL_CONFIGURE=no \
+            KERNEL_ONLY=no \
+            BUILD_MINIMAL=${{ env.TYPE == 'minimal' && 'yes' || 'no' }} \
+            BUILD_DESKTOP=no \
+            EXPERT=yes \
+            USE_CCACHE=no \
+            NO_APT_CACHER=yes \
+            COMPRESS_OUTPUTIMAGE=img,xz,sha,gpg
+          sudo chown $(id -u):$(id -g) -R output/
+
+      - name: Install Dependents
+        run: |
+          sudo apt install img2simg
+
+          ver="v0.3.0"
+          curl -L -o ./AmlImg https://github.com/hzyitc/AmlImg/releases/download/$ver/AmlImg_${ver}_linux_amd64
+          chmod +x ./AmlImg
+
+      - name: Download and unpack the latest u-boot
+        run: |
+          echo "::group::Download"
+          curl -L -o ./uboot.img https://github.com/${UBOOT_REPO}/releases/download/${UBOOT_TAG}/${UBOOT_BURNIMG}
+          echo "::endgroup::"
+
+          echo "::group::Unpack"
+          ./AmlImg unpack ./uboot.img burn/
+          echo "::endgroup::"
+
+      - name: Extract boot and rootfs partitions
+        run: |
+          diskimg=$(ls output/images/*.img)
+          loop=$(sudo losetup --find --show --partscan $diskimg)
+          sudo img2simg ${loop}p1 burn/boot.simg
+          sudo img2simg ${loop}p2 burn/rootfs.simg
+          sudo losetup -d $loop
+          sudo chown $(id -u):$(id -g) -R burn/
+
+      - name: Generate burn image
+        run: |
+          echo -n "sha1sum $(sha1sum burn/boot.simg | awk '{print $1}')" >burn/boot.VERIFY
+          echo -n "sha1sum $(sha1sum burn/rootfs.simg | awk '{print $1}')" >burn/rootfs.VERIFY
+
+          cat <<EOF >>burn/commands.txt
+          PARTITION:boot:sparse:boot.simg
+          VERIFY:boot:normal:boot.VERIFY
+          PARTITION:rootfs:sparse:rootfs.simg
+          VERIFY:rootfs:normal:rootfs.VERIFY
+          EOF
+
+          prefix=$(ls output/images/*.img | sed 's/\.img$//')
+          burnimg=${prefix}.burn.img
+          ./AmlImg pack $burnimg burn/
+
+      - name: Hash and compress burn image
+        run: |
+          cd output/images/
+          burnimg=$(ls *.burn.img)
+          sha256sum $burnimg | tee ${burnimg}.sha
+
+          pixz -9 <$burnimg >${burnimg}.xz
+
+      - name: Clean original files
+        run: |
+          rm -rf output/images/*.img
+
+      - name: Show sha256sum
+        run: |
+          cat output/images/*.sha
+
+          cat <<EOF | sed -E 's/^  //' >>$GITHUB_STEP_SUMMARY
+            # SHA256
+            $(cat output/images/*.sha | awk '{printf "%s: `%s`\n", $2, $1}')
+          EOF
+
+      - name: Release
+        working-directory: userpatches
+        run: |
+          cat <<EOF | sed -E 's/^  //' >Release.md
+            CI $(date -d "$TIME" +'%Y-%m-%d %H:%M:%S %Z(%:z)')
+
+            # Sources
+            U-Boot: [${UBOOT_REPO}@${UBOOT_RELEASE}](https://github.com/${UBOOT_REPO}/releases/tag/${UBOOT_RELEASE}) ([\`${UBOOT_TAG}\`](https://github.com/${UBOOT_REPO}/releases/tag/${UBOOT_TAG}))
+            Armbian: [${ARMBIAN_REPO}@${ARMBIAN_REF}](https://github.com/${ARMBIAN_REPO}/tree/${ARMBIAN_REF}) ([\`${ARMBIAN_SHA}\`](https://github.com/${ARMBIAN_REPO}/tree/${ARMBIAN_SHA}))
+            Userpatch: [${USERPATCH_REPO}@${USERPATCH_REF}](https://github.com/${USERPATCH_REPO}/tree/${USERPATCH_REF}) ([\`${USERPATCH_SHA}\`](https://github.com/${USERPATCH_REPO}/tree/${USERPATCH_SHA}))
+
+            # SHA256
+            $(cat ../output/images/*.sha | awk '{printf "%s: `%s`\n", $2, $1}')
+          EOF
+
+          tag="ci-$(date -d "$TIME" -u +'%Y%m%d-%H%M%S-%Z')"
+          hub release create  -t "$GITHUB_SHA" "$tag" -F Release.md \
+            $(for a in ../output/images/*; do echo -a $a; done)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
