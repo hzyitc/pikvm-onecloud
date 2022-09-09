@@ -1,0 +1,21 @@
+dts: USB0: Switch to device mode
+
+---
+ arch/arm/boot/dts/meson8b-onecloud.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/boot/dts/meson8b-onecloud.dts b/arch/arm/boot/dts/meson8b-onecloud.dts
+index 89e3e3238dec..a869f9240de6 100644
+--- a/arch/arm/boot/dts/meson8b-onecloud.dts
++++ b/arch/arm/boot/dts/meson8b-onecloud.dts
+@@ -443,6 +443,7 @@ &usb0_phy {
+ 
+ &usb0 {
+ 	status = "okay";
++	dr_mode = "peripheral";
+ };
+ 
+ &usb1_phy {
+-- 
+2.34.1
+
