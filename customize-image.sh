@@ -18,7 +18,7 @@ Main() {
 InstallKvmd() {
 
 	# TAG=$(curl "https://api.github.com/repos/hzyitc/kvmd-debian/releases/latest" | jq -r .tag_name)
-	TAG=debian-v3.85
+	TAG=debian-v3.134
 	VERSION=$(echo "$TAG" | grep -oE '[0-9]+([\.-][0-9]+)+')
 
 	# Donwload the packages
@@ -50,10 +50,8 @@ InstallKvmd() {
 	# All services will be enable by default in firstrun
 	# So we need to mask those we don't need
 	systemctl mask nginx
-	systemctl mask kvmd-bootconfig
 	systemctl mask kvmd-watchdog kvmd-tc358743
 	systemctl mask kvmd-janus kvmd-janus-static
-	systemctl mask kvmd-vnc kvmd-ipmi
 	systemctl mask kvmd-otgnet
 
 	rm python3-kvmd_${VERSION}_all.deb kvmd-platform-v2-hdmiusb-generic_${VERSION}_all.deb
