@@ -18,7 +18,7 @@ Main() {
 InstallKvmd() {
 
 	# TAG=$(curl "https://api.github.com/repos/hzyitc/kvmd-debian/releases/latest" | jq -r .tag_name)
-	TAG=debian-v3.134
+	TAG=debian-v3.142
 	VERSION=$(echo "$TAG" | grep -oE '[0-9]+([\.-][0-9]+)+')
 
 	# Donwload the packages
